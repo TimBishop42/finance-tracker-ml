@@ -1,32 +1,15 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import Response
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from prometheus_client import Counter, Histogram, generate_latest
+from prometheus_client import generate_latest
 from src.api.routes import router as api_router
 from src.config import settings
 
 # Create rate limiter
 limiter = Limiter(key_func=get_remote_address)
-
-# Create metrics
-PREDICTION_COUNTER = Counter(
-    'prediction_total',
-    'Total number of predictions made',
-    ['endpoint']
-)
-PREDICTION_LATENCY = Histogram(
-    'prediction_latency_seconds',
-    'Time spent processing predictions',
-    ['endpoint']
-)
-TRAINING_COUNTER = Counter(
-    'training_total',
-    'Total number of training operations',
-    ['status']
-)
 
 # Create FastAPI app
 app = FastAPI(

@@ -1,9 +1,8 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional, List, AnyHttpUrl
-
+from typing import Optional, List, Union
+from pydantic import AnyHttpUrl, validator
 from pydantic_settings import BaseSettings
-from pydantic import validator
 
 
 class Settings(BaseSettings):
@@ -42,7 +41,7 @@ class Settings(BaseSettings):
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
 
     @validator("BACKEND_CORS_ORIGINS", pre=True)
-    def assemble_cors_origins(cls, v: str | List[str]) -> List[str] | str:
+    def assemble_cors_origins(cls, v: Union[str, List[str]]) -> Union[List[str], str]:
         if isinstance(v, str) and not v.startswith("["):
             return [i.strip() for i in v.split(",")]
         elif isinstance(v, (list, str)):
@@ -53,7 +52,8 @@ class Settings(BaseSettings):
         case_sensitive = True
         env_file = ".env"
 
+# Create settings instance
+settings = Settings()
 
-@lru_cache()
-def get_settings() -> Settings:
-    return Settings() 
+# Export settings
+__all__ = ["settings"] 

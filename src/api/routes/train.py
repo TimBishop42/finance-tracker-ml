@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from src.api.models.schemas import TrainRequest
 from src.ml.model import TransactionCategorizer
-from src.api.main import TRAINING_COUNTER
+from src.api.metrics import TRAINING_COUNTER
 
 router = APIRouter()
 categorizer = TransactionCategorizer()

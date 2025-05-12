@@ -3,15 +3,12 @@ from typing import List
 from fastapi import APIRouter, HTTPException
 
 from ..models.schemas import CategorizedTransaction, PredictRequest, PredictResponse
-from ...ml.model.lightgbm_model import LightGBMModel
 from src.ml.model import TransactionCategorizer
-from src.api.main import PREDICTION_COUNTER, PREDICTION_LATENCY
+from src.api.metrics import PREDICTION_COUNTER, PREDICTION_LATENCY
 import time
 
 router = APIRouter()
-model = LightGBMModel()  # In production, this would be loaded from disk
 categorizer = TransactionCategorizer()
-
 
 @router.post("/batch", response_model=PredictResponse)
 async def predict_batch(request: PredictRequest) -> PredictResponse:

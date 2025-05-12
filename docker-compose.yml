@@ -1,10 +1,8 @@
 version: '3.8'
 
 services:
-  ml-service:
-    build:
-      context: .
-      dockerfile: Dockerfile
+  finance-tracke-ml:
+    image: tbished/finance-tracker-ml:latest
     ports:
       - "8000:8000"
     volumes:
@@ -19,8 +17,6 @@ services:
       - DB_NAME=finance
       - DB_USER=finance-user
       - DB_PASSWORD=change_me
-    networks:
-      - finance_network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -28,7 +24,3 @@ services:
       retries: 3
       start_period: 10s
     restart: unless-stopped
-
-networks:
-  finance_network:
-    external: true  # Use the existing network instead of creating a new one 
