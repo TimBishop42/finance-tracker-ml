@@ -1,30 +1,23 @@
 from fastapi import APIRouter, HTTPException
-
-from ..models.schemas import TrainRequest
-from ...ml.model.lightgbm_model import LightGBMModel
+from src.api.models.schemas import TrainRequest
+from src.ml.model import TransactionCategorizer
+from src.api.main import TRAINING_COUNTER
 
 router = APIRouter()
-model = LightGBMModel()  # In production, this would be loaded from disk
+categorizer = TransactionCategorizer()
 
-
-@router.post("", status_code=204)
-async def train(request: TrainRequest) -> None:
+@router.post("")
+async def train(request: TrainRequest):
+    """Train the model with new data including user corrections."""
     try:
-        # Extract features
-        business_names = [t.business_name for t in request.transactions]
-        amounts = [t.amount for t in request.transactions]
-        
-        # Train model
-        model.train(
-            business_names=business_names,
-            amounts=amounts,
-            categories=request.categories,
-            confidence_scores=request.confidence_scores,
-            user_corrections=request.user_corrections,
+        categorizer.train(
+            request.transactions,
+            request.categories,
+            request.confidence_scores,
+            request.user_corrections
         )
-        
-        # Save model (in production, this would be to a persistent storage)
-        model.save("model.joblib")
-        
+        TRAINING_COUNTER.labels(status="success").inc()
+        return {"status": "success"}
     except Exception as e:
+        TRAINING_COUNTER.labels(status="error").inc()
         raise HTTPException(status_code=500, detail=str(e)) 

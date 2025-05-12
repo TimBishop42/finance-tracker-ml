@@ -1,8 +1,9 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, AnyHttpUrl
 
 from pydantic_settings import BaseSettings
+from pydantic import validator
 
 
 class Settings(BaseSettings):
@@ -11,7 +12,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Finance Transaction Categorization ML Service"
     
     # Model Settings
-    MODEL_DIR: Path = Path("models")
+    MODEL_DIR: str = "models"
     MODEL_FILENAME: str = "model.joblib"
     DEFAULT_CATEGORIES: list[str] = [
         "FOOD",
@@ -25,14 +26,29 @@ class Settings(BaseSettings):
     
     # ML Settings
     TFIDF_MAX_FEATURES: int = 1000
-    TFIDF_NGRAM_RANGE: tuple[int, int] = (1, 2)
+    TFIDF_NGRAM_RANGE: tuple = (1, 2)
     LGBM_N_ESTIMATORS: int = 100
     LGBM_LEARNING_RATE: float = 0.1
     LGBM_NUM_LEAVES: int = 31
     
-    # CORS Settings
-    BACKEND_CORS_ORIGINS: list[str] = ["*"]
+    # Database settings
+    DB_HOST: str = "localhost"
+    DB_PORT: int = 5432
+    DB_NAME: str = "finance"
+    DB_USER: str = "finance-user"
+    DB_PASSWORD: str = "change_me"
     
+    # CORS Settings
+    BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
+
+    @validator("BACKEND_CORS_ORIGINS", pre=True)
+    def assemble_cors_origins(cls, v: str | List[str]) -> List[str] | str:
+        if isinstance(v, str) and not v.startswith("["):
+            return [i.strip() for i in v.split(",")]
+        elif isinstance(v, (list, str)):
+            return v
+        raise ValueError(v)
+
     class Config:
         case_sensitive = True
         env_file = ".env"

@@ -27,13 +27,20 @@ format:
 type-check:
     poetry run mypy src
 
-# Build Docker image
+# Build Docker image for linux/amd64
 docker-build:
-    docker build -t finance-tracker-ml .
+    docker build --platform linux/amd64 -t tbished/finance-tracker-ml:latest .
+
+# Push Docker image to registry
+docker-push:
+    docker push tbished/finance-tracker-ml:latest
+
+# Build and push Docker image
+docker-build-push: docker-build docker-push
 
 # Run Docker container
 docker-run:
-    docker run -p 8000:8000 finance-tracker-ml
+    docker run -p 8000:8000 tbished/finance-tracker-ml:latest
 
 # Clean up Python cache files
 clean:
