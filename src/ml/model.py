@@ -97,6 +97,13 @@ class TransactionCategorizer:
         texts = [f"{t['business_name']} {t.get('comment', '')}" for t in transactions]
         X = self.vectorizer.fit_transform(texts)
         
+        # If categories is empty, use user_corrections as the source of truth
+        if not categories and user_corrections:
+            # Create a list of categories from user corrections
+            categories = [""] * len(transactions)  # Initialize with empty strings
+            for idx, cat in user_corrections.items():
+                categories[idx] = cat
+        
         # Update categories if needed
         new_categories = set(categories)
         if new_categories != set(self.categories):
@@ -110,7 +117,7 @@ class TransactionCategorizer:
         # Prepare labels
         y = np.array([self.categories.index(cat) for cat in categories])
         
-        # Apply user corrections
+        # Apply user corrections (this will override any existing categories)
         for idx, corrected_cat in user_corrections.items():
             y[idx] = self.categories.index(corrected_cat)
 

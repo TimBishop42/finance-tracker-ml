@@ -125,6 +125,64 @@ Updates the model with new training data from user corrections.
 
 ### Local Development
 
+### Testing
+
+When running locally, can call the predict and train endpoints with variations of the below sample curls
+
+```
+# Predict Batch
+curl -X POST http://localhost:8000/api/v1/predict/batch \
+  -H "Content-Type: application/json" \
+  -d '{
+    "transactions": [
+      {
+        "transaction_id": 12345,
+        "date": "2024-03-20T10:00:00Z",
+        "amount": 25.50,
+        "business_name": "STARBUCKS",
+        "comment": "Coffee purchase"
+      },
+      {
+        "transaction_id": 12346,
+        "date": "2024-03-20T11:00:00Z",
+        "amount": 45.00,
+        "business_name": "UBER",
+        "comment": "Ride to work"
+      }
+    ],
+    "categories": ["FOOD", "TRANSPORT", "ENTERTAINMENT", "SHOPPING", "BILLS", "INCOME", "OTHER"]
+  }'
+```
+```
+# Train
+curl -X POST http://localhost:8000/api/v1/train \
+  -H "Content-Type: application/json" \
+  -d '{
+    "transactions": [
+      {
+        "transaction_id": 12345,
+        "date": "2024-03-20T10:00:00Z",
+        "amount": 25.50,
+        "business_name": "STARBUCKS",
+        "comment": "Coffee purchase"
+      },
+      {
+        "transaction_id": 12346,
+        "date": "2024-03-20T11:00:00Z",
+        "amount": 45.00,
+        "business_name": "UBER",
+        "comment": "Ride to work"
+      }
+    ],
+    "categories": ["FOOD", "TRANSPORT"],
+    "confidence_scores": [0.95, 0.85],
+    "user_corrections": {
+      "0": "ENTERTAINMENT"
+    }
+  }'
+
+  ```
+
 1. **Standalone Service**:
 ```bash
 # Install dependencies
@@ -146,7 +204,7 @@ docker-compose up --build
 just docker-build-push
 ```
 
-3. **Using Master Docker Compose**:
+3. **Using Docker Compose**:
 ```bash
 # From the main finance-tracker repository
 docker-compose up -d finance-tracker-ml
