@@ -14,13 +14,19 @@ class Settings(BaseSettings):
     MODEL_DIR: str = "models"
     MODEL_FILENAME: str = "model.joblib"
     DEFAULT_CATEGORIES: list[str] = [
-        "FOOD",
-        "TRANSPORT",
-        "ENTERTAINMENT",
-        "SHOPPING",
-        "BILLS",
-        "INCOME",
-        "OTHER",
+        "Alcohol",
+        "Baby",
+        "Bills",
+        "Chocolate",
+        "Coffee",
+        "Eating Out",
+        "Fuel",
+        "Groceries",
+        "House",
+        "Miscellaneous",
+        "Pet Food",
+        "Transport",
+        "Vet",
     ]
     
     # ML Settings

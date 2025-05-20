@@ -25,7 +25,7 @@ async def predict_batch(request: PredictRequest) -> PredictResponse:
         PREDICTION_LATENCY.labels(endpoint="batch").observe(latency)
         PREDICTION_COUNTER.labels(endpoint="batch").inc()
         
-        logger.info(f"Batch prediction completed in {latency:.2f}s")
+        logger.info(f"Batch prediction completed in {latency:.2f}s for {len(categorized_transactions)} transactions")
         return PredictResponse(categorized_transactions=categorized_transactions)
     except Exception as e:
         logger.error(f"Error in batch prediction: {str(e)}", exc_info=True)

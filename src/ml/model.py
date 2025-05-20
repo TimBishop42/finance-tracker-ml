@@ -39,12 +39,58 @@ class TransactionCategorizer:
             max_features=settings.TFIDF_MAX_FEATURES,
             ngram_range=settings.TFIDF_NGRAM_RANGE
         )
+        
+        # Initialize with some common business names and their categories
+        business_category_map = {
+            "STARBUCKS": "Coffee",
+            "COSTA": "Coffee",
+            "CAFE_NERO": "Coffee",
+            "UBER": "Transport",
+            "LYFT": "Transport",
+            "TAXI": "Transport",
+            "SHELL": "Fuel",
+            "BP": "Fuel",
+            "TESCO": "Groceries",
+            "SAINSBURYS": "Groceries",
+            "ASDA": "Groceries",
+            "VET4PETS": "Vet",
+            "VETS": "Vet",
+            "PETSATHOME": "Pet Food",
+            "PETSHOP": "Pet Food",
+            "AMAZON": "House",
+            "IKEA": "House",
+            "WATER_COMPANY": "Bills",
+            "ELECTRIC_COMPANY": "Bills",
+            "GAS_COMPANY": "Bills",
+            "WINE_SHOP": "Alcohol",
+            "BEER_SHOP": "Alcohol",
+            "CHOCOLATE_SHOP": "Chocolate",
+            "SWEET_SHOP": "Chocolate",
+            "BABY_SHOP": "Baby",
+            "MOTHERCARE": "Baby",
+            "RESTAURANT": "Eating Out",
+            "CAFE": "Eating Out",
+            "MISCELLANEOUS_SHOP": "Miscellaneous"
+        }
+        
+        # Create training texts by combining business names with their categories
+        initial_texts = [f"{business} {category}" for business, category in business_category_map.items()]
+        self.vectorizer.fit(initial_texts)
+        
         self.model = lgb.LGBMClassifier(
             n_estimators=settings.LGBM_N_ESTIMATORS,
             learning_rate=settings.LGBM_LEARNING_RATE,
             num_leaves=settings.LGBM_NUM_LEAVES
         )
         self.categories = settings.DEFAULT_CATEGORIES
+        
+        # Train initial model with dummy data
+        X = self.vectorizer.transform(initial_texts)
+        y = np.zeros(len(initial_texts))  # All transactions in first category
+        self.model.fit(X, y)
+        
+        # Save the initialized model
+        self._save_model()
 
     def _save_model(self) -> None:
         """Save the model, vectorizer, and metadata to disk."""
@@ -69,7 +115,7 @@ class TransactionCategorizer:
             raise RuntimeError("Model not loaded or initialized")
 
         # Extract features
-        texts = [f"{t['business_name']} {t.get('comment', '')}" for t in transactions]
+        texts = [f"{t.business_name} {t.comment or ''}" for t in transactions]
         features = self.vectorizer.transform(texts)
 
         # Get predictions
@@ -79,10 +125,16 @@ class TransactionCategorizer:
         # Format results
         results = []
         for i, (pred, probs) in enumerate(zip(predictions, probabilities)):
+            transaction = transactions[i]
+            pred_idx = int(pred)  # Convert to int once and reuse
             results.append({
-                **transactions[i],
-                "predicted_category": self.categories[pred],
-                "confidence_score": float(probs[pred])
+                "transaction_id": transaction.transaction_id,
+                "date": transaction.date,
+                "amount": transaction.amount,
+                "business_name": transaction.business_name,
+                "comment": transaction.comment,
+                "predicted_category": self.categories[pred_idx],
+                "confidence_score": float(probs[pred_idx])
             })
 
         return results
