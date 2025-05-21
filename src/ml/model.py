@@ -6,6 +6,9 @@ import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 import lightgbm as lgb
 from src.config import settings
+import logging
+
+logger = logging.getLogger(__name__)
 
 class TransactionCategorizer:
     def __init__(self):
@@ -36,58 +39,163 @@ class TransactionCategorizer:
     def _initialize_model(self) -> None:
         """Initialize a new model with default settings."""
         self.vectorizer = TfidfVectorizer(
-            max_features=settings.TFIDF_MAX_FEATURES,
-            ngram_range=settings.TFIDF_NGRAM_RANGE
+            max_features=1000,
+            ngram_range=(1, 3),  # Use up to 3-grams
+            stop_words='english',
+            min_df=2,
+            max_df=0.95,  # Ignore terms that appear in more than 95% of documents
+            analyzer='char_wb'  # Use character n-grams
         )
         
-        # Initialize with some common business names and their categories
+        # Initialize with a more diverse set of business names and their categories
         business_category_map = {
+            # Coffee shops
             "STARBUCKS": "Coffee",
             "COSTA": "Coffee",
             "CAFE_NERO": "Coffee",
+            "GLORIA_JEANS": "Coffee",
+            "COFFEE_CLUB": "Coffee",
+            "ZAMBRERO": "Eating Out",
+            "ROLLD": "Eating Out",
+            "MCDONALDS": "Eating Out",
+            "KFC": "Eating Out",
+            "HUNGRY_JACKS": "Eating Out",
+            "SUBWAY": "Eating Out",
+            "GRILLD": "Eating Out",
+            
+            # Transport
             "UBER": "Transport",
             "LYFT": "Transport",
             "TAXI": "Transport",
+            "SYDNEY_TRAINS": "Transport",
+            "BUS": "Transport",
+            "TRAM": "Transport",
+            "FERRY": "Transport",
+            
+            # Fuel
             "SHELL": "Fuel",
             "BP": "Fuel",
-            "TESCO": "Groceries",
-            "SAINSBURYS": "Groceries",
-            "ASDA": "Groceries",
+            "CALTEX": "Fuel",
+            "7-ELEVEN": "Fuel",
+            "METRO": "Fuel",
+            
+            # Groceries
+            "WOOLWORTHS": "Groceries",
+            "COLES": "Groceries",
+            "ALDI": "Groceries",
+            "IGA": "Groceries",
+            "FRESH_MARKET": "Groceries",
+            "FRUIT_SHOP": "Groceries",
+            
+            # Pet related
             "VET4PETS": "Vet",
             "VETS": "Vet",
+            "PETSTOCK": "Pet Food",
             "PETSATHOME": "Pet Food",
             "PETSHOP": "Pet Food",
+            
+            # House and home
             "AMAZON": "House",
             "IKEA": "House",
-            "WATER_COMPANY": "Bills",
-            "ELECTRIC_COMPANY": "Bills",
-            "GAS_COMPANY": "Bills",
-            "WINE_SHOP": "Alcohol",
-            "BEER_SHOP": "Alcohol",
-            "CHOCOLATE_SHOP": "Chocolate",
+            "BUNNINGS": "House",
+            "HARVEY_NORMAN": "House",
+            "JB_HIFI": "House",
+            "OFFICEWORKS": "House",
+            
+            # Bills
+            "WATER_CORP": "Bills",
+            "ELECTRICITY": "Bills",
+            "GAS": "Bills",
+            "INTERNET": "Bills",
+            "PHONE": "Bills",
+            "INSURANCE": "Bills",
+            
+            # Alcohol
+            "BWS": "Alcohol",
+            "DAN_MURPHYS": "Alcohol",
+            "LIQUORLAND": "Alcohol",
+            "BOTTLE_SHOP": "Alcohol",
+            
+            # Chocolate and sweets
+            "CADBURY": "Chocolate",
+            "NESTLE": "Chocolate",
             "SWEET_SHOP": "Chocolate",
-            "BABY_SHOP": "Baby",
+            "CANDY_STORE": "Chocolate",
+            
+            # Baby
+            "BABY_BUNTING": "Baby",
             "MOTHERCARE": "Baby",
-            "RESTAURANT": "Eating Out",
-            "CAFE": "Eating Out",
-            "MISCELLANEOUS_SHOP": "Miscellaneous"
+            "BABY_SHOP": "Baby",
+            "TOYS_R_US": "Baby",
+            
+            # Miscellaneous
+            "POST_OFFICE": "Miscellaneous",
+            "NEWSAGENT": "Miscellaneous",
+            "PHARMACY": "Miscellaneous",
+            "CHEMIST": "Miscellaneous"
         }
         
-        # Create training texts by combining business names with their categories
-        initial_texts = [f"{business} {category}" for business, category in business_category_map.items()]
-        self.vectorizer.fit(initial_texts)
+        # Create training texts and labels
+        initial_texts = []
+        initial_labels = []
         
-        self.model = lgb.LGBMClassifier(
-            n_estimators=settings.LGBM_N_ESTIMATORS,
-            learning_rate=settings.LGBM_LEARNING_RATE,
-            num_leaves=settings.LGBM_NUM_LEAVES
-        )
+        # Add each business name multiple times with variations
+        for business, category in business_category_map.items():
+            # Add the business name as is
+            initial_texts.append(business)
+            initial_labels.append(category)
+            
+            # Add with common suffixes
+            for suffix in [" PTY LTD", " STORE", " SHOP", " AUSTRALIA", " SYDNEY", " MELBOURNE"]:
+                initial_texts.append(f"{business}{suffix}")
+                initial_labels.append(category)
+            
+            # Add with category name
+            initial_texts.append(f"{business} {category}")
+            initial_labels.append(category)
+            
+            # Add with common variations
+            if " " in business:
+                parts = business.split()
+                initial_texts.append("".join(parts))  # Remove spaces
+                initial_labels.append(category)
+                initial_texts.append("_".join(parts))  # Use underscores
+                initial_labels.append(category)
+        
+        # Fit vectorizer and transform texts
+        X = self.vectorizer.fit_transform(initial_texts)
+        
+        # Initialize categories
         self.categories = settings.DEFAULT_CATEGORIES
         
-        # Train initial model with dummy data
-        X = self.vectorizer.transform(initial_texts)
-        y = np.zeros(len(initial_texts))  # All transactions in first category
+        # Create label indices
+        y = np.array([self.categories.index(cat) for cat in initial_labels])
+        
+        # Initialize and train model with better parameters
+        self.model = lgb.LGBMClassifier(
+            n_estimators=500,  # Increased for better learning
+            learning_rate=0.01,  # Decreased for more stable learning
+            num_leaves=31,
+            num_class=len(self.categories),
+            random_state=42,
+            class_weight='balanced',
+            min_child_samples=5,
+            min_child_weight=1,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            reg_alpha=0.1,  # L1 regularization
+            reg_lambda=0.1,  # L2 regularization
+            importance_type='gain'  # Use gain for feature importance
+        )
+        
+        # Train initial model
         self.model.fit(X, y)
+        
+        # Log feature importance
+        feature_names = self.vectorizer.get_feature_names_out()
+        importance = self.model.feature_importances_
+        top_features = sorted(zip(feature_names, importance), key=lambda x: x[1], reverse=True)[:10]
+        logger.info(f"Top 10 important features: {top_features}")
         
         # Save the initialized model
         self._save_model()
@@ -114,28 +222,61 @@ class TransactionCategorizer:
         if not self.model or not self.vectorizer:
             raise RuntimeError("Model not loaded or initialized")
 
+        logger.info(f"Starting prediction for {len(transactions)} transactions")
+        logger.info(f"Available categories: {self.categories}")
+
         # Extract features
-        texts = [f"{t.business_name} {t.comment or ''}" for t in transactions]
+        texts = []
+        for t in transactions:
+            business_name = t.business_name if hasattr(t, 'business_name') else t.get('business_name', '')
+            comment = t.comment if hasattr(t, 'comment') else t.get('comment', '')
+            # Clean and normalize business name
+            business_name = business_name.strip().upper()
+            texts.append(f"{business_name} {comment or ''}")
+        
+        logger.info(f"Extracted texts for prediction: {texts}")
+        
+        # Transform texts to features
         features = self.vectorizer.transform(texts)
+        logger.info(f"Feature matrix shape: {features.shape}")
+        logger.info(f"Feature names: {self.vectorizer.get_feature_names_out()}")
 
         # Get predictions
         probabilities = self.model.predict_proba(features)
         predictions = self.model.predict(features)
+        logger.info(f"Raw predictions: {predictions}")
+        logger.info(f"Prediction probabilities: {probabilities}")
 
         # Format results
         results = []
         for i, (pred, probs) in enumerate(zip(predictions, probabilities)):
             transaction = transactions[i]
             pred_idx = int(pred)  # Convert to int once and reuse
-            results.append({
-                "transaction_id": transaction.transaction_id,
-                "date": transaction.date,
-                "amount": transaction.amount,
-                "business_name": transaction.business_name,
-                "comment": transaction.comment,
+            
+            # Handle both Pydantic models and dicts
+            transaction_id = transaction.transaction_id if hasattr(transaction, 'transaction_id') else transaction.get('transaction_id')
+            date = transaction.date if hasattr(transaction, 'date') else transaction.get('date')
+            amount = transaction.amount if hasattr(transaction, 'amount') else transaction.get('amount')
+            business_name = transaction.business_name if hasattr(transaction, 'business_name') else transaction.get('business_name')
+            comment = transaction.comment if hasattr(transaction, 'comment') else transaction.get('comment')
+            
+            # Get top 3 predictions
+            top_indices = np.argsort(probs)[-3:][::-1]
+            top_categories = [self.categories[idx] for idx in top_indices]
+            top_probs = [float(probs[idx]) for idx in top_indices]
+            
+            result = {
+                "transaction_id": transaction_id,
+                "date": date,
+                "amount": amount,
+                "business_name": business_name,
+                "comment": comment,
                 "predicted_category": self.categories[pred_idx],
-                "confidence_score": float(probs[pred_idx])
-            })
+                "confidence_score": float(probs[pred_idx]),
+                "top_predictions": list(zip(top_categories, top_probs))
+            }
+            logger.info(f"Formatted result for transaction {i}: {result}")
+            results.append(result)
 
         return results
 
@@ -145,25 +286,31 @@ class TransactionCategorizer:
         if not self.model or not self.vectorizer:
             raise RuntimeError("Model not loaded or initialized")
 
+        logger.info(f"Starting model training with {len(transactions)} transactions")
+        logger.info(f"Current categories: {self.categories}")
+        logger.info(f"New categories: {categories}")
+        logger.info(f"User corrections: {user_corrections}")
+
         # Prepare training data
-        texts = [f"{t['business_name']} {t.get('comment', '')}" for t in transactions]
-        X = self.vectorizer.fit_transform(texts)
+        texts = [f"{t.business_name} {t.comment or ''}" for t in transactions]
         
-        # If categories is empty, use user_corrections as the source of truth
-        if not categories and user_corrections:
-            # Create a list of categories from user corrections
-            categories = [""] * len(transactions)  # Initialize with empty strings
-            for idx, cat in user_corrections.items():
-                categories[idx] = cat
+        # Update vectorizer vocabulary if needed
+        if not hasattr(self.vectorizer, 'vocabulary_'):
+            X = self.vectorizer.fit_transform(texts)
+        else:
+            X = self.vectorizer.transform(texts)
         
         # Update categories if needed
         new_categories = set(categories)
         if new_categories != set(self.categories):
+            logger.info(f"Updating categories from {self.categories} to {list(new_categories)}")
             self.categories = list(new_categories)
+            # Reinitialize model with new number of categories
             self.model = lgb.LGBMClassifier(
                 n_estimators=settings.LGBM_N_ESTIMATORS,
                 learning_rate=settings.LGBM_LEARNING_RATE,
-                num_leaves=settings.LGBM_NUM_LEAVES
+                num_leaves=settings.LGBM_NUM_LEAVES,
+                num_class=len(self.categories)
             )
 
         # Prepare labels
@@ -171,7 +318,13 @@ class TransactionCategorizer:
         
         # Apply user corrections (this will override any existing categories)
         for idx, corrected_cat in user_corrections.items():
-            y[idx] = self.categories.index(corrected_cat)
+            if corrected_cat in self.categories:
+                y[idx] = self.categories.index(corrected_cat)
+            else:
+                logger.warning(f"Unknown category {corrected_cat} in user corrections")
+
+        logger.info(f"Training labels: {y}")
+        logger.info(f"Training data shape: {X.shape}")
 
         # Train model
         self.model.fit(X, y)
@@ -183,6 +336,8 @@ class TransactionCategorizer:
             "n_samples": len(transactions),
             "n_categories": len(self.categories)
         }
+
+        logger.info(f"Model training completed with accuracy: {train_accuracy}")
 
         # Save updated model
         self._save_model()

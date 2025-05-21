@@ -17,9 +17,11 @@ async def predict_batch(request: PredictRequest) -> PredictResponse:
     """Predict categories for a batch of transactions."""
     try:
         logger.info(f"Processing batch prediction request with {len(request.transactions)} transactions")
+        logger.info(f"Request data: {request.model_dump_json(indent=2)}")
         start_time = time.time()
         
         categorized_transactions = categorizer.predict(request.transactions)
+        logger.info(f"Model predictions: {categorized_transactions}")
         
         latency = time.time() - start_time
         PREDICTION_LATENCY.labels(endpoint="batch").observe(latency)
