@@ -39,12 +39,12 @@ class TransactionCategorizer:
     def _initialize_model(self) -> None:
         """Initialize a new model with default settings."""
         self.vectorizer = TfidfVectorizer(
-            max_features=1000,
-            ngram_range=(1, 3),  # Use up to 3-grams
+            max_features=2000,  # Increased for better feature capture
+            ngram_range=(1, 4),  # Increased to capture more patterns
             stop_words='english',
-            min_df=2,
-            max_df=0.95,  # Ignore terms that appear in more than 95% of documents
-            analyzer='char_wb'  # Use character n-grams
+            min_df=1,  # Allow rare terms
+            max_df=0.95,
+            analyzer='char_wb'
         )
         
         # Initialize with a more diverse set of business names and their categories
@@ -146,7 +146,7 @@ class TransactionCategorizer:
             initial_labels.append(category)
             
             # Add with common suffixes
-            for suffix in [" PTY LTD", " STORE", " SHOP", " AUSTRALIA", " SYDNEY", " MELBOURNE"]:
+            for suffix in [" PTY LTD", " STORE", " SHOP", " AUSTRALIA", " SYDNEY", " MELBOURNE", " DIRECT DEBIT", " RECEIPT", " TRANSFER", " PAYMENT"]:
                 initial_texts.append(f"{business}{suffix}")
                 initial_labels.append(category)
             
@@ -173,19 +173,23 @@ class TransactionCategorizer:
         
         # Initialize and train model with better parameters
         self.model = lgb.LGBMClassifier(
-            n_estimators=500,  # Increased for better learning
-            learning_rate=0.01,  # Decreased for more stable learning
-            num_leaves=31,
+            objective='multiclass',
+            n_estimators=200,  # Increased for better learning
+            learning_rate=0.1,  # Increased for faster convergence
+            num_leaves=31,  # Increased for more complex patterns
             num_class=len(self.categories),
             random_state=42,
             class_weight='balanced',
-            min_child_samples=5,
-            min_child_weight=1,
+            min_child_samples=1,  # Allow more granular splits
+            min_child_weight=0.1,
             subsample=0.8,
             colsample_bytree=0.8,
-            reg_alpha=0.1,  # L1 regularization
-            reg_lambda=0.1,  # L2 regularization
-            importance_type='gain'  # Use gain for feature importance
+            reg_alpha=0.1,
+            reg_lambda=0.1,
+            importance_type='gain',
+            min_data_in_leaf=1,  # Allow more granular leaves
+            min_gain_to_split=0.0,
+            max_depth=6  # Increased for more complex patterns
         )
         
         # Train initial model
@@ -292,31 +296,58 @@ class TransactionCategorizer:
         logger.info(f"User corrections: {user_corrections}")
 
         # Prepare training data
-        texts = [f"{t.business_name} {t.comment or ''}" for t in transactions]
-        
-        # Update vectorizer vocabulary if needed
-        if not hasattr(self.vectorizer, 'vocabulary_'):
-            X = self.vectorizer.fit_transform(texts)
-        else:
-            X = self.vectorizer.transform(texts)
+        texts = []
+        for t in transactions:
+            business_name = t.business_name if hasattr(t, 'business_name') else t.get('business_name', '')
+            comment = t.comment if hasattr(t, 'comment') else t.get('comment', '')
+            # Clean and normalize business name
+            business_name = business_name.strip().upper()
+            texts.append(f"{business_name} {comment or ''}")
         
         # Update categories if needed
         new_categories = set(categories)
         if new_categories != set(self.categories):
             logger.info(f"Updating categories from {self.categories} to {list(new_categories)}")
             self.categories = list(new_categories)
+            
+            # Reinitialize vectorizer with new data
+            self.vectorizer = TfidfVectorizer(
+                max_features=2000,
+                ngram_range=(1, 4),
+                stop_words='english',
+                min_df=1,
+                max_df=0.95,
+                analyzer='char_wb'
+            )
+            
             # Reinitialize model with new number of categories
             self.model = lgb.LGBMClassifier(
-                n_estimators=settings.LGBM_N_ESTIMATORS,
-                learning_rate=settings.LGBM_LEARNING_RATE,
-                num_leaves=settings.LGBM_NUM_LEAVES,
-                num_class=len(self.categories)
+                objective='multiclass',
+                n_estimators=200,
+                learning_rate=0.1,
+                num_leaves=31,
+                num_class=len(self.categories),
+                random_state=42,
+                class_weight='balanced',
+                min_child_samples=1,
+                min_child_weight=0.1,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                reg_alpha=0.1,
+                reg_lambda=0.1,
+                importance_type='gain',
+                min_data_in_leaf=1,
+                min_gain_to_split=0.0,
+                max_depth=6
             )
-
+        
+        # Transform texts to features
+        X = self.vectorizer.fit_transform(texts)
+        
         # Prepare labels
         y = np.array([self.categories.index(cat) for cat in categories])
         
-        # Apply user corrections (this will override any existing categories)
+        # Apply user corrections
         for idx, corrected_cat in user_corrections.items():
             if corrected_cat in self.categories:
                 y[idx] = self.categories.index(corrected_cat)
