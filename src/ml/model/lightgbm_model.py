@@ -19,10 +19,23 @@ class LightGBMModel(BaseModel):
         self.scaler = StandardScaler()
         self.categories = None
 
-    def _prepare_features(
+    def _prepare_features_train(
         self, business_names: List[str], amounts: List[float]
     ) -> np.ndarray:
-        """Prepare features for model prediction/training."""
+        """Prepare features for model training - fits transformers."""
+        # Convert business names to TF-IDF features
+        text_features = self.vectorizer.fit_transform(business_names).toarray()
+        
+        # Scale amount features
+        amount_features = self.scaler.fit_transform(np.array(amounts).reshape(-1, 1))
+        
+        # Combine features
+        return np.hstack([text_features, amount_features])
+
+    def _prepare_features_predict(
+        self, business_names: List[str], amounts: List[float]
+    ) -> np.ndarray:
+        """Prepare features for prediction - uses fitted transformers."""
         # Convert business names to TF-IDF features
         text_features = self.vectorizer.transform(business_names).toarray()
         
@@ -36,7 +49,7 @@ class LightGBMModel(BaseModel):
         if self.model is None:
             raise RuntimeError("Model not trained or loaded")
 
-        features = self._prepare_features(business_names, amounts)
+        features = self._prepare_features_predict(business_names, amounts)
         probabilities = self.model.predict_proba(features)
         
         # Get predicted categories and confidence scores
@@ -64,21 +77,26 @@ class LightGBMModel(BaseModel):
             for idx, corrected_category in user_corrections.items():
                 categories[idx] = corrected_category
         
-        # Prepare features
-        features = self._prepare_features(business_names, amounts)
+        # Prepare features using training method
+        features = self._prepare_features_train(business_names, amounts)
         
         # Convert categories to indices
         category_to_idx = {cat: idx for idx, cat in enumerate(self.categories)}
         labels = np.array([category_to_idx[cat] for cat in categories])
         
-        # Initialize or update model
-        if self.model is None:
-            self.model = lgb.LGBMClassifier(
-                n_estimators=100,
-                learning_rate=0.1,
-                num_leaves=31,
-                random_state=42,
-            )
+        # Initialize or update model with better parameters to prevent overfitting
+        self.model = lgb.LGBMClassifier(
+            n_estimators=50,  # Reduced to prevent overfitting
+            learning_rate=0.05,  # Reduced learning rate
+            num_leaves=15,  # Reduced complexity
+            min_child_samples=5,  # Prevent overfitting on small datasets
+            min_split_gain=0.1,  # Require minimum gain for splits
+            subsample=0.8,  # Use bagging
+            colsample_bytree=0.8,  # Feature bagging
+            reg_alpha=0.1,  # L1 regularization
+            reg_lambda=0.1,  # L2 regularization
+            random_state=42,
+        )
         
         # Train model
         self.model.fit(
