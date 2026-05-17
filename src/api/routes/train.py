@@ -1,11 +1,10 @@
 from fastapi import APIRouter, HTTPException
 from src.api.models.schemas import TrainRequest
-from src.ml.model import TransactionCategorizer
+from src.dependencies import categorizer
 from src.api.metrics import TRAINING_COUNTER
 from src.api.logging import get_logger
 
 router = APIRouter()
-categorizer = TransactionCategorizer()
 logger = get_logger(__name__)
 
 @router.post("")

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.model_selection import train_test_split
 import lightgbm as lgb
 from src.config import settings
 import logging
@@ -174,22 +175,22 @@ class TransactionCategorizer:
         # Initialize and train model with better parameters
         self.model = lgb.LGBMClassifier(
             objective='multiclass',
-            n_estimators=50,  # Reduced to prevent overfitting
-            learning_rate=0.05,  # Reduced learning rate  
-            num_leaves=15,  # Reduced complexity
+            n_estimators=settings.LGBM_N_ESTIMATORS,
+            learning_rate=settings.LGBM_LEARNING_RATE,
+            num_leaves=settings.LGBM_NUM_LEAVES,
             num_class=len(self.categories),
             random_state=42,
             class_weight='balanced',
-            min_child_samples=5,  # Prevent overfitting
+            min_child_samples=5,
             min_child_weight=0.1,
             subsample=0.8,
             colsample_bytree=0.8,
             reg_alpha=0.1,
             reg_lambda=0.1,
             importance_type='gain',
-            min_data_in_leaf=5,  # Increased from 1
-            min_gain_to_split=0.1,  # Increased from 0.0
-            max_depth=4  # Reduced complexity
+            min_data_in_leaf=5,
+            min_gain_to_split=0.1,
+            max_depth=4
         )
         
         # Train initial model
@@ -326,8 +327,8 @@ class TransactionCategorizer:
 
         return results
 
-    def train(self, transactions: List[Dict], categories: List[str], 
-             confidence_scores: List[float], user_corrections: Dict[int, str]) -> None:
+    def train(self, transactions: List[Dict], categories: List[str],
+             confidence_scores: List[float], user_corrections: Optional[Dict[int, str]] = None) -> None:
         """Train the model with new data including user corrections."""
         if not self.model or not self.vectorizer:
             raise RuntimeError("Model not loaded or initialized")
@@ -336,7 +337,7 @@ class TransactionCategorizer:
         logger.info(f"Current categories: {self.categories}")
         logger.info(f"Training categories (ground truth): {categories}")
         logger.info(f"User corrections: {user_corrections}")
-        
+
         # If this is a large training set (>100 transactions), treat as full retrain
         is_full_retrain = len(transactions) > 100
         if is_full_retrain:
@@ -352,47 +353,49 @@ class TransactionCategorizer:
             # Clean and normalize business name
             business_name = business_name.strip().upper()
             texts.append(f"{business_name} {comment or ''}")
-        
+
         logger.info(f"Training texts: {texts}")
-        
-        # Update categories if needed - add any new categories from training data
+
+        # Update categories if needed - add any new categories from training data.
+        # ML-H7: guard user_corrections before calling .values()
         all_categories = set(self.categories)
         all_categories.update(categories)
-        all_categories.update(user_corrections.values())
-        
+        if user_corrections:
+            all_categories.update(user_corrections.values())
+
         if all_categories != set(self.categories):
             logger.info(f"Updating categories from {self.categories} to {sorted(all_categories)}")
             self.categories = sorted(all_categories)
-            
-            # Reinitialize model with new number of categories
+
+            # Reinitialize model with new number of categories (ML-M10: use settings)
             self.model = lgb.LGBMClassifier(
                 objective='multiclass',
-                n_estimators=50,  # Reduced to prevent overfitting
-                learning_rate=0.05,  # Reduced learning rate
-                num_leaves=15,  # Reduced complexity
+                n_estimators=settings.LGBM_N_ESTIMATORS,
+                learning_rate=settings.LGBM_LEARNING_RATE,
+                num_leaves=settings.LGBM_NUM_LEAVES,
                 num_class=len(self.categories),
                 random_state=42,
                 class_weight='balanced',
-                min_child_samples=5,  # Prevent overfitting
+                min_child_samples=5,
                 min_child_weight=0.1,
                 subsample=0.8,
                 colsample_bytree=0.8,
                 reg_alpha=0.1,
                 reg_lambda=0.1,
                 importance_type='gain',
-                min_data_in_leaf=5,  # Increased from 1
-                min_gain_to_split=0.1,  # Increased from 0.0
-                max_depth=4  # Reduced complexity
+                min_data_in_leaf=5,
+                min_gain_to_split=0.1,
+                max_depth=4
             )
         else:
             # Keep existing model but update parameters to prevent overfitting if needed
-            if not hasattr(self.model, 'n_estimators') or self.model.n_estimators > 100:
+            if not hasattr(self.model, 'n_estimators') or self.model.n_estimators > settings.LGBM_N_ESTIMATORS:
                 logger.info("Updating model parameters to prevent overfitting")
                 self.model = lgb.LGBMClassifier(
                     objective='multiclass',
-                    n_estimators=50,
-                    learning_rate=0.05,
-                    num_leaves=15,
+                    n_estimators=settings.LGBM_N_ESTIMATORS,
+                    learning_rate=settings.LGBM_LEARNING_RATE,
+                    num_leaves=settings.LGBM_NUM_LEAVES,
                     num_class=len(self.categories),
                     random_state=42,
                     class_weight='balanced',
@@ -407,94 +410,85 @@ class TransactionCategorizer:
                     min_gain_to_split=0.1,
                     max_depth=4
                 )
-        
-        # Handle vectorizer differently for full retrain vs incremental training
+
+        # ML-M5: for incremental training freeze the vocabulary; only use fit_transform
+        # on a full retrain so IDF weights are not distorted by synthetic tokens.
         if is_full_retrain:
-            # For full retrain, refit vectorizer on all training data
             logger.info("Full retrain: refitting vectorizer on all training data")
             X_train = self.vectorizer.fit_transform(texts)
         else:
-            # For incremental training, preserve existing vectorizer vocabulary
-            logger.info("Incremental training: using existing vectorizer")
-            old_vocabulary = getattr(self.vectorizer, 'vocabulary_', {})
-            old_feature_count = len(old_vocabulary) if old_vocabulary else 0
-            
-            # Create expanded training corpus that includes both new data and representative old patterns
-            expanded_texts = texts.copy()
-            
-            # Add some representative patterns from existing vocabulary to preserve knowledge
-            if old_vocabulary:
-                # Add top vocabulary terms as synthetic examples
-                vocab_items = sorted(old_vocabulary.items(), key=lambda x: x[1])[:100]  # Top 100 terms
-                for term, _ in vocab_items:
-                    if len(term) > 3:  # Only meaningful terms
-                        expanded_texts.append(term)
-            
-            logger.info(f"Expanded training corpus size: {len(expanded_texts)} (original: {len(texts)})")
-            
-            # Refit vectorizer on expanded corpus
-            X = self.vectorizer.fit_transform(expanded_texts)
-            new_feature_count = X.shape[1]
-            
-            # If feature dimensions changed, we need to reinitialize the model
-            if new_feature_count != old_feature_count:
-                logger.info(f"Feature dimensions changed from {old_feature_count} to {new_feature_count}, reinitializing model")
-                self.model = lgb.LGBMClassifier(
-                    objective='multiclass',
-                    n_estimators=50,  # Reduced to prevent overfitting
-                    learning_rate=0.05,  # Reduced learning rate
-                    num_leaves=15,  # Reduced complexity
-                    num_class=len(self.categories),
-                    random_state=42,
-                    class_weight='balanced',
-                    min_child_samples=5,  # Prevent overfitting
-                    min_child_weight=0.1,
-                    subsample=0.8,
-                    colsample_bytree=0.8,
-                    reg_alpha=0.1,
-                    reg_lambda=0.1,
-                    importance_type='gain',
-                    min_data_in_leaf=5,  # Increased from 1
-                    min_gain_to_split=0.1,  # Increased from 0.0
-                    max_depth=4  # Reduced complexity
-                )
-            
-            # Transform only the actual training texts
+            logger.info("Incremental training: freezing vectorizer vocabulary (transform only)")
             X_train = self.vectorizer.transform(texts)
-        
-        # Prepare labels from the GROUND TRUTH categories, not predictions
-        y = np.array([self.categories.index(cat) for cat in categories])
-        
-        # Apply user corrections (these override the ground truth)
-        for idx, corrected_cat in user_corrections.items():
-            if corrected_cat in self.categories:
-                logger.info(f"Applying user correction: transaction {idx} -> {corrected_cat}")
-                y[idx] = self.categories.index(corrected_cat)
-            else:
-                logger.warning(f"Unknown category {corrected_cat} in user corrections")
+
+        # ML-M9: build label array, skipping transactions whose category is not in
+        # self.categories (unknown categories are logged as warnings).
+        valid_indices = []
+        y_list = []
+        for i, cat in enumerate(categories):
+            if cat not in self.categories:
+                logger.warning(
+                    f"Unknown category '{cat}' for transaction index {i}; skipping."
+                )
+                continue
+            valid_indices.append(i)
+            y_list.append(self.categories.index(cat))
+
+        if not valid_indices:
+            raise ValueError("No valid training samples after filtering unknown categories.")
+
+        X_train = X_train[valid_indices]
+        y = np.array(y_list)
+
+        # ML-H7 + ML-H8: apply user corrections with None guard and bounds check
+        if user_corrections:
+            for idx, corrected_cat in user_corrections.items():
+                # ML-H8: bounds check against the (possibly filtered) label array
+                if idx >= len(y):
+                    logger.warning(
+                        f"User correction index {idx} is out of bounds (y length {len(y)}); skipping."
+                    )
+                    continue
+                if corrected_cat in self.categories:
+                    logger.info(f"Applying user correction: transaction {idx} -> {corrected_cat}")
+                    y[idx] = self.categories.index(corrected_cat)
+                else:
+                    logger.warning(f"Unknown category '{corrected_cat}' in user corrections; skipping.")
 
         logger.info(f"Final training labels: {y}")
         logger.info(f"Label distribution: {np.bincount(y)}")
         logger.info(f"Training data shape: {X_train.shape}")
 
-        # Check if we have enough variety in the data
         unique_labels = len(np.unique(y))
         if unique_labels < 2:
             logger.warning(f"Only {unique_labels} unique labels found. Model may not learn effectively.")
-        
-        # Train model
-        self.model.fit(X_train, y)
+
+        # ML-M6: 80/20 train/validation split for honest accuracy reporting.
+        # Skip split when there are fewer than 20 samples.
+        n_samples = len(y)
+        if n_samples >= 20:
+            X_fit, X_val, y_fit, y_val = train_test_split(
+                X_train, y, test_size=0.2, random_state=42, stratify=y if unique_labels > 1 else None
+            )
+            self.model.fit(X_fit, y_fit)
+            train_accuracy = float(self.model.score(X_fit, y_fit))
+            val_accuracy = float(self.model.score(X_val, y_val))
+            logger.info(f"Train accuracy: {train_accuracy:.4f}, Val accuracy: {val_accuracy:.4f}")
+        else:
+            logger.info(f"Fewer than 20 samples ({n_samples}); skipping train/val split.")
+            self.model.fit(X_train, y)
+            train_accuracy = float(self.model.score(X_train, y))
+            val_accuracy = None
 
         # Update performance metrics
-        train_accuracy = self.model.score(X_train, y)
         self.model_metadata["performance_metrics"] = {
             "train_accuracy": train_accuracy,
-            "n_samples": len(transactions),
+            "val_accuracy": val_accuracy,
+            "n_samples": n_samples,
             "n_categories": len(self.categories),
             "unique_labels": unique_labels
         }
 
-        logger.info(f"Model training completed with accuracy: {train_accuracy}")
+        logger.info(f"Model training completed. Train accuracy: {train_accuracy}, Val accuracy: {val_accuracy}")
 
         # Save updated model
         self._save_model()

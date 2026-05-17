@@ -3,13 +3,12 @@ from typing import List
 from fastapi import APIRouter, HTTPException
 
 from ..models.schemas import CategorizedTransaction, PredictRequest, PredictResponse
-from src.ml.model import TransactionCategorizer
+from src.dependencies import categorizer
 from src.api.metrics import PREDICTION_COUNTER, PREDICTION_LATENCY
 from src.api.logging import get_logger
 import time
 
 router = APIRouter()
-categorizer = TransactionCategorizer()
 logger = get_logger(__name__)
 
 @router.post("/batch", response_model=PredictResponse)
