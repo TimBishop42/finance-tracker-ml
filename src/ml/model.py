@@ -265,25 +265,15 @@ class TransactionCategorizer:
         logger.info(f"Current categories count: {len(self.categories)}")
         logger.info(f"Model classes: {getattr(self.model, 'classes_', 'N/A')}")
 
-        # CRITICAL FIX: Validate that model predictions match current categories
-        max_pred_idx = np.max(predictions) if len(predictions) > 0 else -1
-        if max_pred_idx >= len(self.categories):
-            logger.error(f"Model prediction index {max_pred_idx} exceeds categories bounds {len(self.categories)-1}.")
-            logger.error(f"This indicates model/categories mismatch. Clearing and reinitializing model...")
-            # Clear corrupted model and reinitialize
-            self._clear_model()
-            # Retry prediction
-            probabilities = self.model.predict_proba(features)
-            predictions = self.model.predict(features)
-            logger.info(f"Retried predictions: {predictions}")
-
-        # Additional validation for probabilities shape
-        if probabilities.shape[1] != len(self.categories):
-            logger.error(f"Probabilities shape {probabilities.shape} doesn't match categories {len(self.categories)}")
-            logger.error("Clearing and reinitializing model to fix shape mismatch...")
-            self._clear_model()
-            probabilities = self.model.predict_proba(features)
-            predictions = self.model.predict(features)
+        # NOTE (ML-C3 fix): do NOT reset the model here. A fitted classifier's
+        # predict_proba width equals the number of categories actually seen during
+        # training, which is normally fewer than len(self.categories) (the full
+        # category list). The previous code treated that as "corruption" and called
+        # _clear_model() mid-request, discarding the freshly-trained model and
+        # serving every prediction from the synthetic baseline. predict() returns a
+        # valid category index into self.categories, and predict_proba columns map
+        # back to category indices via self.model.classes_ (handled below).
+        model_classes = list(getattr(self.model, "classes_", range(len(self.categories))))
 
         # Format results
         results = []
@@ -303,14 +293,16 @@ class TransactionCategorizer:
             business_name = transaction.business_name if hasattr(transaction, 'business_name') else transaction.get('business_name')
             comment = transaction.comment if hasattr(transaction, 'comment') else transaction.get('comment')
             
-            # Get top 3 predictions with bounds checking
-            top_indices = np.argsort(probs)[-3:][::-1]
+            # Get top 3 predictions. probs is indexed by the model's class columns,
+            # so map each column position back to its category index via model_classes.
+            top_cols = np.argsort(probs)[-3:][::-1]
             top_categories = []
             top_probs = []
-            for idx in top_indices:
-                if idx < len(self.categories):
-                    top_categories.append(self.categories[idx])
-                    top_probs.append(float(probs[idx]))
+            for col in top_cols:
+                cat_idx = int(model_classes[col])
+                if 0 <= cat_idx < len(self.categories):
+                    top_categories.append(self.categories[cat_idx])
+                    top_probs.append(float(probs[col]))
             
             result = {
                 "transaction_id": transaction_id,
@@ -319,7 +311,7 @@ class TransactionCategorizer:
                 "business_name": business_name,
                 "comment": comment,
                 "predicted_category": self.categories[pred_idx],
-                "confidence_score": float(probs[pred_idx]),
+                "confidence_score": float(np.max(probs)),
                 "top_predictions": list(zip(top_categories, top_probs))
             }
             logger.info(f"Formatted result for transaction {i}: {result}")
